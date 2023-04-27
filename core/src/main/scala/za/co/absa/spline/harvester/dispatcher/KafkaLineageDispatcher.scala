@@ -54,19 +54,27 @@ class KafkaLineageDispatcher(
   logInfo(s"Kafka topic: $topic")
   logDebug(s"Producer API version: $apiVersion")
 
+  @volatile
+  private var lastExecutionPlan: ExecutionPlan = _
+
   private val planRecordSender = SplineRecordSender(SplineEntityType.ExecutionPlan, apiVersion, topic, kafkaProducer)
   private val eventRecordSender = SplineRecordSender(SplineEntityType.ExecutionEvent, apiVersion, topic, kafkaProducer)
   private val modelMapper = ModelMapper.forApiVersion(apiVersion)
 
   override def send(plan: ExecutionPlan): Unit = {
-    for (planDTO <- modelMapper.toDTO(plan)) {
-      planRecordSender.send(planDTO.toJson, plan.id.get)
-    }
+   this.lastExecutionPlan = plan
   }
 
   override def send(event: ExecutionEvent): Unit = {
-    for (eventDTO <- modelMapper.toDTO(event)) {
-      eventRecordSender.send(eventDTO.toJson, event.planId)
+    try{
+      val planWithEvent = Map(
+        "executionPlan" -> this.lastExecutionPlan,
+        "executionEvent" -> event
+      )
+      logInfo(s"planWithEvent = : $planWithEvent")
+      eventRecordSender.send(planWithEvent.toJson, event.planId)
+    }finally {
+      this.lastExecutionPlan = null
     }
   }
 
